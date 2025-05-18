@@ -1,31 +1,27 @@
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла
+# Загрузка переменных окружения
 load_dotenv()
 
 
 class Config:
-    # Основные настройки бота
-    BOT_TOKEN = os.getenv('BOT_TOKEN')
-    ADMIN_IDS = [int(id) for id in os.getenv('ADMIN_IDS', '').split(',') if id]
+    @property
+    def BOT_TOKEN(self):
+        return os.getenv('BOT_TOKEN', 'fake_bot_token_123')
 
-    # Настройки API
-    API_URL = os.getenv('API_URL')
-    API_KEY = os.getenv('API_KEY')
+    @property
+    def ADMIN_IDS(self):
+        ids = os.getenv('ADMIN_IDS', '').split(',')
+        return [int(id.strip()) for id in ids if id.strip().isdigit()]
 
-    # Настройки приложения
-    DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 't')
-
-    # Проверка обязательных переменных
-    @classmethod
-    def validate(cls):
-        required_vars = ['BOT_TOKEN', 'API_URL', 'API_KEY']
-        missing_vars = [var for var in required_vars if not getattr(cls, var)]
-
-        if missing_vars:
-            raise ValueError(f"Отсутствуют обязательные переменные: {', '.join(missing_vars)}")
+    def validate(self):
+        if not self.BOT_TOKEN:
+            raise ValueError("BOT_TOKEN не задан")
+        if not self.ADMIN_IDS:
+            raise ValueError("ADMIN_IDS не заданы")
 
 
-# Валидируем конфиг при импорте
-Config.validate()
+# Создаем и валидируем конфиг
+config = Config()
+config.validate()

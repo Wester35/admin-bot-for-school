@@ -1,26 +1,41 @@
-import requests
-from config import Config
+from datetime import datetime
+import random
 
 class ApiClient:
     def __init__(self):
-        self.base_url = Config.API_URL
-        self.headers = {'Authorization': f'Bearer {Config.API_KEY}'}
+        self.news_storage = []
+        self.schedule_storage = {
+            'last_updated': None,
+            'data': "Расписание не задано"
+        }
 
     def add_news(self, title, content, image_url=None):
-        data = {'title': title, 'content': content}
-        if image_url:
-            data['image_url'] = image_url
-        response = requests.post(f'{self.base_url}/news', json=data, headers=self.headers)
-        return response.json()
+        new_news = {
+            'id': random.randint(1000, 9999),
+            'title': title,
+            'content': content,
+            'image_url': image_url,
+            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        self.news_storage.append(new_news)
+        return {"status": "success", "id": new_news['id']}
 
     def update_schedule(self, schedule_data):
-        response = requests.put(f'{self.base_url}/schedule', json=schedule_data, headers=self.headers)
-        return response.json()
+        self.schedule_storage = {
+            'last_updated': datetime.now().strftime("%Y-%m-%d %H:%M"),
+            'data': schedule_data
+        }
+        return {"status": "success"}
 
     def get_news(self):
-        response = requests.get(f'{self.base_url}/news', headers=self.headers)
-        return response.json()
+        return {"news": self.news_storage}
 
     def get_schedule(self):
-        response = requests.get(f'{self.base_url}/schedule', headers=self.headers)
-        return response.json()
+        return self.schedule_storage
+
+    def clear_all(self):  # Для тестирования
+        self.news_storage = []
+        self.schedule_storage = {
+            'last_updated': None,
+            'data': "Расписание не задано"
+        }

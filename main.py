@@ -1,75 +1,168 @@
-import logging
-from aiogram import Bot, Dispatcher, executor, types
-from config import BOT_TOKEN, ADMIN_IDS
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ReplyKeyboardRemove
+from config import config
 from api_client import ApiClient
 from keyboards import get_main_menu, get_news_menu, get_schedule_menu
-from config import Config
+import asyncio
+import logging
 
-# Использование конфига в коде
-bot = Bot(token=Config.BOT_TOKEN)
-dp = Dispatcher(bot)
-
-def is_admin(user_id):
-    return user_id in Config.ADMIN_IDS
-
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-
+# Инициализация бота и хранилища
+bot = Bot(token=config.BOT_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 api = ApiClient()
 
 
+# Состояния FSM
+class NewsStates(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_content = State()
+
+
+class ScheduleStates(StatesGroup):
+    waiting_for_schedule = State()
+
+
 # Проверка прав администратора
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
+def is_admin(user_id: int) -> bool:
+    return user_id in config.ADMIN_IDS
 
 
-@dp.message_handler(commands=['start'])
-async def send_welcome(message: types.Message):
+# ================= ОБРАБОТЧИКИ КОМАНД =================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
     if not is_admin(message.from_user.id):
-        await message.reply("Доступ запрещен")
+        await message.answer("⛔ Доступ запрещен", reply_markup=ReplyKeyboardRemove())
         return
 
-    await message.reply("Добро пожаловать в админ-панель!", reply_markup=get_main_menu())
+    await message.answer(
+        "👋 Добро пожаловать в админ-панель!",
+        reply_markup=get_main_menu()
+    )
 
 
-@dp.message_handler(lambda message: message.text == 'Новости')
-async def news_menu(message: types.Message):
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    help_text = """
+    📚 Доступные команды:
+    /start - Главное меню
+    /help - Справка
+    /clear - Очистить все данные (только для теста)
+    """
+    await message.answer(help_text)
+
+
+@dp.message(Command("clear"))
+async def cmd_clear(message: types.Message):
     if not is_admin(message.from_user.id):
         return
 
-    await message.answer("Управление новостями:", reply_markup=get_news_menu())
+    api.clear_all()
+    await message.answer("🔄 Все данные очищены")
 
 
-@dp.message_handler(lambda message: message.text == 'Расписание')
-async def schedule_menu(message: types.Message):
+# ================= ОБРАБОТЧИКИ МЕНЮ =================
+@dp.message(F.text == "Новости")
+async def menu_news(message: types.Message):
     if not is_admin(message.from_user.id):
         return
 
-    await message.answer("Управление расписанием:", reply_markup=get_schedule_menu())
+    await message.answer(
+        "📰 Управление новостями:",
+        reply_markup=get_news_menu()
+    )
 
 
-@dp.callback_query_handler(lambda c: c.data == 'add_news')
-async def add_news_callback(callback_query: types.CallbackQuery):
-    await bot.answer_callback_query(callback_query.id)
-    await bot.send_message(callback_query.from_user.id, "Введите заголовок новости:")
+@dp.message(F.text == "Расписание")
+async def menu_schedule(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    await message.answer(
+        "📅 Управление расписанием:",
+        reply_markup=get_schedule_menu()
+    )
 
 
-@dp.message_handler(
-    lambda message: message.reply_to_message and message.reply_to_message.text == "Введите заголовок новости:")
-async def process_news_title(message: types.Message):
-    title = message.text
-    await message.reply("Теперь введите содержание новости:")
-    # Здесь можно сохранить title в состоянии (например, в словаре)
+# ================= НОВОСТИ =================
+@dp.callback_query(F.data == "add_news")
+async def add_news_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("✏ Введите заголовок новости:")
+    await state.set_state(NewsStates.waiting_for_title)
+    await callback.answer()
 
 
-@dp.message_handler(
-    lambda message: message.reply_to_message and message.reply_to_message.text == "Теперь введите содержание новости:")
-async def process_news_content(message: types.Message):
-    content = message.text
-    # Получаем сохраненный title из состояния
-    # result = api.add_news(title, content)
-    await message.reply("Новость успешно добавлена!")
+@dp.message(NewsStates.waiting_for_title)
+async def process_news_title(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.answer("📝 Теперь введите содержание новости:")
+    await state.set_state(NewsStates.waiting_for_content)
 
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+@dp.message(NewsStates.waiting_for_content)
+async def process_news_content(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    result = api.add_news(data['title'], message.text)
+
+    await message.answer(f"✅ Новость добавлена (ID: {result['id']})")
+    await state.clear()
+
+
+@dp.callback_query(F.data == "list_news")
+async def list_news(callback: types.CallbackQuery):
+    news = api.get_news()
+    if not news['news']:
+        await callback.message.answer("📭 Список новостей пуст")
+        return
+
+    response = "📋 Последние новости:\n\n"
+    for item in news['news'][-5:]:  # Показываем 5 последних
+        response += f"📌 <b>{item['title']}</b>\n{item['content']}\n\n"
+
+    await callback.message.answer(response)
+    await callback.answer()
+
+
+# ================= РАСПИСАНИЕ =================
+@dp.callback_query(F.data == "update_schedule")
+async def update_schedule_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("✏ Введите новое расписание:")
+    await state.set_state(ScheduleStates.waiting_for_schedule)
+    await callback.answer()
+
+
+@dp.message(ScheduleStates.waiting_for_schedule)
+async def process_schedule_update(message: types.Message, state: FSMContext):
+    result = api.update_schedule(message.text)
+    await message.answer("✅ Расписание обновлено")
+    await state.clear()
+
+
+@dp.callback_query(F.data == "view_schedule")
+async def view_schedule(callback: types.CallbackQuery):
+    schedule = api.get_schedule()
+    response = f"📅 Текущее расписание:\n\n{schedule['data']}"
+
+    if schedule['last_updated']:
+        response += f"\n\n🔄 Обновлено: {schedule['last_updated']}"
+
+    await callback.message.answer(response)
+    await callback.answer()
+
+
+# ================= ЗАПУСК БОТА =================
+async def main():
+    logger.info("Starting bot...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
