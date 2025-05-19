@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.types import ReplyKeyboardRemove
 
 from config import config
-from keyboards import get_news_menu, get_schedule_menu, get_main_menu
+from app.keyboards import get_news_menu, get_schedule_menu, get_main_menu
 from aiogram import F, Router
 
 router = Router()
@@ -54,13 +54,6 @@ async def menu_schedule(message: Message):
     )
 
 #===========РАСПИСАНИЕ==========
-@router.message(F.text == "Назад")
-async def back_to_main_menu(message:Message):
-    if not is_admin(message.from_user.id):
-        return
-    await message.answer(
-        "👋 Добро пожаловать в админ-панель!", reply_markup=get_main_menu()
-    )
 
 @router.message(F.photo)
 async def get_photo(message: Message):
