@@ -1,3 +1,5 @@
+from mailbox import Message
+
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
@@ -24,6 +26,7 @@ api = ApiClient()
 class NewsStates(StatesGroup):
     waiting_for_title = State()
     waiting_for_content = State()
+    waiting_for_media = State()
 
 
 class ScheduleStates(StatesGroup):
@@ -102,8 +105,18 @@ async def add_news_start(callback: types.CallbackQuery, state: FSMContext):
 async def process_news_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
     await message.answer("📝 Теперь введите содержание новости:")
-    await state.set_state(NewsStates.waiting_for_content)
+    await state.set_state(NewsStates.waiting_for_media)
 
+@dp.message(F.photo)
+async def photo_handler(message: Message) -> None:
+
+
+@dp.message(NewsStates.waiting_for_media)
+async def process_news_title(message: types.Message, state: FSMContext):
+    photo_data = message.photo[-1]
+    await state.update_data(title=message.photo)
+    await message.answer("📝 Теперь отправьте фото:")
+    await state.set_state(NewsStates.waiting_for_content)
 
 @dp.message(NewsStates.waiting_for_content)
 async def process_news_content(message: types.Message, state: FSMContext):
