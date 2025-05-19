@@ -10,18 +10,17 @@ from keyboards import get_main_menu, get_news_menu, get_schedule_menu
 import asyncio
 import logging
 
-# Настройка логирования
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация бота и хранилища
+
 bot = Bot(token=config.BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 api = ApiClient()
 
 
-# Состояния FSM
 class NewsStates(StatesGroup):
     waiting_for_title = State()
     waiting_for_content = State()
@@ -31,7 +30,6 @@ class ScheduleStates(StatesGroup):
     waiting_for_schedule = State()
 
 
-# Проверка прав администратора
 def is_admin(user_id: int) -> bool:
     return user_id in config.ADMIN_IDS
 
