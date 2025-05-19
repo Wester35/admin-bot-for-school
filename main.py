@@ -251,6 +251,11 @@ async def cmd_media(message: types.Message):
         await message.answer_media_group([types.InputMediaPhoto(media=photo) for photo in media])
     else:
         await message.answer("Нет сохраненных фото")
+
+@dp.message(Command("cancel"))
+async def cancel_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Действие отменено", reply_markup=ReplyKeyboardRemove())
 # ================= РАСПИСАНИЕ =================
 @dp.callback_query(F.data == "update_schedule")
 async def update_schedule_start(callback: types.CallbackQuery, state: FSMContext):

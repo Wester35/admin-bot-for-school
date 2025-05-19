@@ -46,9 +46,6 @@ class ApiClient:
         }
         return {"status": "success"}
 
-    def get_news(self):
-        return {"news": self.news_storage}
-
     def get_schedule(self):
         return self.schedule_storage
 
