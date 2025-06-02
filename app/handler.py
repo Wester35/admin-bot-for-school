@@ -2,6 +2,7 @@ import os
 import uuid
 from pathlib import Path
 
+from aiogram.client.session import aiohttp
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -10,6 +11,9 @@ from aiogram.types import ReplyKeyboardRemove
 from config import config
 from app.keyboards import get_news_menu, get_schedule_menu, get_main_menu
 from aiogram import F, Router
+
+
+API_URL = "http://localhost:41235/news/add"
 
 router = Router()
 
@@ -116,8 +120,6 @@ async def save_news_photo(message: Message, state: FSMContext):
     # await state.update_data(photos=photos)
     # await message.answer(f"Фото сохранено. Отправьте ещё или введите 'Готово'.")
 
-
-# Завершение
 @router.message(NewsStates.waiting_for_photos, F.text.lower() == "готово")
 async def finish_news_creation(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -125,27 +127,52 @@ async def finish_news_creation(message: Message, state: FSMContext):
     content = data.get("content")
     photos = data.get("photos", [])
 
-    folder = Path("news")
-    folder.mkdir(exist_ok=True)
+    if not title or not content:
+        await message.answer("❌ Ошибка: отсутствуют заголовок или содержимое.")
+        await state.clear()
+        return
 
-    # Файлы фотографий
-    photo_filenames = []
-    for idx, file_id in enumerate(photos, 1):
-        file = await message.bot.get_file(file_id)
-        file_path = file.file_path
-        dest_filename = folder / f"{title} - photo_{idx}.jpg"
-        await message.bot.download_file(file_path, destination=dest_filename)
-        photo_filenames.append(dest_filename.name)
+    files = []
+    try:
+        temp_folder = Path("temp_news_upload")
+        temp_folder.mkdir(exist_ok=True)
 
-    # .txt
-    txt_path = folder / f"{title}.txt"
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(f"{content}\n\nФайлы изображений:\n")
-        for name in photo_filenames:
-            f.write(f"{name}\n")
+        for idx, file_id in enumerate(photos, 1):
+            file = await message.bot.get_file(file_id)
+            file_path = file.file_path
+            local_path = temp_folder / f"photo_{idx}.jpg"
+            await message.bot.download_file(file_path, destination=local_path)
+            files.append(local_path)
 
-    await message.answer(f"Новость сохранена в файлы.", reply_markup=get_main_menu())
-    await state.clear()
+        form = aiohttp.FormData()
+        form.add_field("title", title)
+        form.add_field("content", content)
+
+        for photo_path in files:
+            form.add_field(
+                "files",
+                open(photo_path, "rb"),
+                filename=photo_path.name,
+                content_type="image/jpeg"
+            )
+
+        async with aiohttp.ClientSession() as session:
+            async with session.put(API_URL, data=form) as response:
+                if response.status == 200:
+                    await message.answer("✅ Новость успешно отправлена!", reply_markup=get_main_menu())
+                else:
+                    error_text = await response.text()
+                    await message.answer(f"❌ Ошибка при отправке: {response.status}\n{error_text}")
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    finally:
+        await state.clear()
+    for file_path in files:
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
 
 @router.message(F.text == "/cancel")
 async def cancel_handler(message: Message, state: FSMContext):
