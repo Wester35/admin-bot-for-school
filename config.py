@@ -1,9 +1,8 @@
 import os
 from dotenv import load_dotenv
 
-# Загрузка переменных окружения
-load_dotenv()
 
+load_dotenv()
 
 class Config:
     @property
@@ -21,7 +20,10 @@ class Config:
         if not self.ADMIN_IDS:
             raise ValueError("ADMIN_IDS не заданы")
 
+    @property
+    def API_BASE(self):
+        return "http://localhost:41235"
 
-# Создаем и валидируем конфиг
+
 config = Config()
 config.validate()
