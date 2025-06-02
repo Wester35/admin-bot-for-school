@@ -27,24 +27,19 @@ class NewsStates(StatesGroup):
 @router.callback_query(F.data == "list_news")
 async def list_news(callback: CallbackQuery):
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(API_LIST_URL) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if not data:
-                        await callback.message.answer("🔍 Новостей пока нет.")
-                        return
+        data = await fetch_news_list()
+        if not data:
+            await callback.message.answer("🔍 Новостей пока нет.")
+            return
 
-                    kb = InlineKeyboardMarkup()
+        kb = InlineKeyboardMarkup()
+        for news in data:
+            title = news.get("title", "Без названия")
+            news_id = news.get("id")
+            kb.add(InlineKeyboardButton(title, callback_data=f"news_{news_id}"))
 
-                    for news in data:
-                        title = news.get("title", "Без названия")
-                        news_id = news.get("id")
-                        kb.add(InlineKeyboardButton(title, callback_data=f"news_{news_id}"))
+        await callback.message.answer("📰 Список новостей:", reply_markup=kb)
 
-                    await callback.message.answer("📰 Список новостей:", reply_markup=kb)
-                else:
-                    await callback.message.answer(f"❌ Ошибка при получении: {response.status}")
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
 
@@ -54,14 +49,10 @@ async def show_single_news(callback: CallbackQuery):
     news_id = callback.data.split("_")[1]
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{API_LIST_URL}{news_id}") as response:
-                if response.status == 200:
-                    news = await response.json()
-                    text = f"📰 <b>{news.get('title')}</b>\n\n{news.get('content')}"
-                    await callback.message.answer(text, parse_mode="HTML")
-                else:
-                    await callback.message.answer(f"❌ Не удалось загрузить новость")
+        news = await fetch_news_by_id(news_id)
+        text = f"📰 <b>{news.get('title')}</b>\n\n{news.get('content')}"
+        await callback.message.answer(text, parse_mode="HTML")
+
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
 
@@ -136,25 +127,12 @@ async def finish_news_creation(message: Message, state: FSMContext):
             await message.bot.download_file(file_path, destination=local_path)
             files.append(local_path)
 
-        form = aiohttp.FormData()
-        form.add_field("title", title)
-        form.add_field("content", content)
+        status, response_text = await upload_news_to_api(title, content, files)
 
-        for photo_path in files:
-            form.add_field(
-                "files",
-                open(photo_path, "rb"),
-                filename=photo_path.name,
-                content_type="image/jpeg"
-            )
-
-        async with aiohttp.ClientSession() as session:
-            async with session.put(API_URL, data=form) as response:
-                if response.status == 200:
-                    await message.answer("✅ Новость успешно отправлена!", reply_markup=get_main_menu())
-                else:
-                    error_text = await response.text()
-                    await message.answer(f"❌ Ошибка при отправке: {response.status}\n{error_text}")
+        if status == 200:
+            await message.answer("✅ Новость успешно отправлена!", reply_markup=get_main_menu())
+        else:
+            await message.answer(f"❌ Ошибка при отправке: {status}\n{response_text}")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
