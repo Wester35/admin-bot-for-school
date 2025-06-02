@@ -6,7 +6,8 @@ from aiogram.client.session import aiohttp
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, CallbackQuery, InputFile, FSInputFile, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, InputFile, FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, \
+    InlineKeyboardButton
 from aiogram.types import ReplyKeyboardRemove
 from config import config
 from app.keyboards import get_news_menu, get_schedule_menu, get_main_menu
@@ -14,6 +15,8 @@ from aiogram import F, Router
 
 
 API_URL = "http://localhost:41235/news/add"
+API_LIST_URL = "http://localhost:41235/news"
+
 
 router = Router()
 
@@ -72,6 +75,49 @@ async def menu_schedule(message: Message):
 
 
 #===========НОВОСТИ=============
+@router.callback_query(F.data == "list_news")
+async def list_news(callback: CallbackQuery):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(API_LIST_URL) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if not data:
+                        await callback.message.answer("🔍 Новостей пока нет.")
+                        return
+
+                    kb = InlineKeyboardMarkup()
+
+                    for news in data:
+                        title = news.get("title", "Без названия")
+                        news_id = news.get("id")
+                        kb.add(InlineKeyboardButton(title, callback_data=f"news_{news_id}"))
+
+                    await callback.message.answer("📰 Список новостей:", reply_markup=kb)
+                else:
+                    await callback.message.answer(f"❌ Ошибка при получении: {response.status}")
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+@router.callback_query(F.data.startswith("news_"))
+async def show_single_news(callback: CallbackQuery):
+    news_id = callback.data.split("_")[1]
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{API_LIST_URL}{news_id}") as response:
+                if response.status == 200:
+                    news = await response.json()
+                    text = f"📰 <b>{news.get('title')}</b>\n\n{news.get('content')}"
+                    await callback.message.answer(text, parse_mode="HTML")
+                else:
+                    await callback.message.answer(f"❌ Не удалось загрузить новость")
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка: {e}")
+
+
+
 @router.callback_query(F.data == 'add_news')
 async def add_news(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
@@ -115,10 +161,7 @@ async def save_news_photo(message: Message, state: FSMContext):
             await message.answer("⛔ Поддерживаются только изображения JPEG, JPG, PNG.")
     else:
         await message.answer("Отправьте фото или изображение-документ, либо напишите 'Готово'.")
-    # photos = data.get("photos", [])
-    # photos.append(message.photo[-1].file_id)
-    # await state.update_data(photos=photos)
-    # await message.answer(f"Фото сохранено. Отправьте ещё или введите 'Готово'.")
+
 
 @router.message(NewsStates.waiting_for_photos, F.text.lower() == "готово")
 async def finish_news_creation(message: Message, state: FSMContext):
