@@ -24,6 +24,26 @@ class NewsStates(StatesGroup):
     waiting_for_photos = State()
 
 
+# @router.callback_query(F.data == "list_news")
+# async def list_news(callback: CallbackQuery):
+#     try:
+#         data = await fetch_news_list()
+#         if not data:
+#             await callback.message.answer("🔍 Новостей пока нет.")
+#             return
+#
+#         buttons = [
+#             [InlineKeyboardButton(text=news.get("title", "Без названия"), callback_data=f"news_{news.get('id')}")]
+#             for news in data
+#         ]
+#
+#         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+#
+#         await callback.message.answer("📰 Список новостей:", reply_markup=kb)
+#
+#     except Exception as e:
+#         await callback.message.answer(f"❌ Ошибка: {e}")
+
 @router.callback_query(F.data == "list_news")
 async def list_news(callback: CallbackQuery):
     try:
@@ -32,13 +52,14 @@ async def list_news(callback: CallbackQuery):
             await callback.message.answer("🔍 Новостей пока нет.")
             return
 
-        kb = InlineKeyboardMarkup()
-        for news in data:
-            title = news.get("title", "Без названия")
-            news_id = news.get("id")
-            kb.add(InlineKeyboardButton(title, callback_data=f"news_{news_id}"))
+        buttons = [
+            [InlineKeyboardButton(text=news.get("title", "Без названия"), callback_data=f"news_{news.get('id')}")]
+            for news in data
+        ]
 
-        await callback.message.answer("📰 Список новостей:", reply_markup=kb)
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons, row_width=1)
+
+        await callback.message.edit_text("📰 Список новостей:", reply_markup=kb)
 
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
@@ -51,10 +72,45 @@ async def show_single_news(callback: CallbackQuery):
     try:
         news = await fetch_news_by_id(news_id)
         text = f"📰 <b>{news.get('title')}</b>\n\n{news.get('content')}"
-        await callback.message.answer(text, parse_mode="HTML")
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✏️ Изменить", callback_data=f"edit_news_{news_id}"),
+                    InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"confirm_delete_{news_id}"),
+                    InlineKeyboardButton(text="<-- Назад", callback_data=f"list_news")
+                ]
+            ],
+            row_width=3
+        )
+
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
+
+@router.callback_query(F.data.startswith("confirm_delete_"))
+async def delete_news(callback: CallbackQuery):
+    news_id = callback.data.split("_")[2]
+
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен", show_alert=True)
+        return
+
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(f"http://localhost:41235/news/delete/{news_id}") as resp:
+            if resp.status == 200:
+                await callback.message.edit_text("✅ Новость удалена.")
+            else:
+                text = await resp.text()
+                await callback.message.edit_text(f"❌ Ошибка при удалении: {resp.status}\n{text}")
+
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_delete")
+async def cancel_delete(callback: CallbackQuery):
+    await callback.message.edit_text("Удаление отменено.", reply_markup=get_main_menu())
+    await callback.answer()
 
 
 
@@ -63,7 +119,7 @@ async def add_news(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен")
         return
-    await callback.message.edit_text("Введите текст новости:")
+    await callback.message.answer("Введите текст новости:")
     await state.set_state(NewsStates.waiting_for_title)
     await callback.answer()
 

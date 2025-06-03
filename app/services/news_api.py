@@ -11,10 +11,20 @@ async def fetch_news_list():
         async with session.get(API_LIST_URL) as response:
             return await response.json()
 
-async def fetch_news_by_id(news_id: str):
+async def fetch_news_by_id(news_id):
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{API_LIST_URL}/{news_id}") as response:
-            return await response.json()
+        async with session.get(f"http://localhost:41235/news/{news_id}") as resp:
+            resp.raise_for_status()
+            try:
+                return await resp.json(content_type=None)
+            except aiohttp.ContentTypeError:
+                text = await resp.text()
+                import json
+                try:
+                    return json.loads(text)
+                except Exception:
+                    return {"text": text}
+
 
 async def upload_news_to_api(title, content, files: list[Path]):
     form = aiohttp.FormData()
