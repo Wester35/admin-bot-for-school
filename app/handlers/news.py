@@ -24,25 +24,11 @@ class NewsStates(StatesGroup):
     waiting_for_photos = State()
 
 
-# @router.callback_query(F.data == "list_news")
-# async def list_news(callback: CallbackQuery):
-#     try:
-#         data = await fetch_news_list()
-#         if not data:
-#             await callback.message.answer("🔍 Новостей пока нет.")
-#             return
-#
-#         buttons = [
-#             [InlineKeyboardButton(text=news.get("title", "Без названия"), callback_data=f"news_{news.get('id')}")]
-#             for news in data
-#         ]
-#
-#         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-#
-#         await callback.message.answer("📰 Список новостей:", reply_markup=kb)
-#
-#     except Exception as e:
-#         await callback.message.answer(f"❌ Ошибка: {e}")
+class EditNewsStates(StatesGroup):
+    waiting_for_new_title = State()
+    waiting_for_new_content = State()
+    waiting_for_new_photos = State()
+
 
 @router.callback_query(F.data == "list_news")
 async def list_news(callback: CallbackQuery):
@@ -204,3 +190,111 @@ async def finish_news_creation(message: Message, state: FSMContext):
 async def cancel_handler(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Действие отменено.", reply_markup=get_main_menu())
+
+
+@router.callback_query(F.data.startswith("edit_news_"))
+async def start_edit_news(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещен")
+        return
+    news_id = callback.data.split("_")[2]
+    await state.update_data(news_id=news_id)
+    await callback.message.answer("Введите новый заголовок новости:")
+    await state.set_state(EditNewsStates.waiting_for_new_title)
+    await callback.answer()
+
+
+@router.message(EditNewsStates.waiting_for_new_title, F.text)
+async def save_new_title(message: Message, state: FSMContext):
+    await state.update_data(new_title=message.text)
+    await message.answer("Введите новое содержание новости:")
+    await state.set_state(EditNewsStates.waiting_for_new_content)
+
+
+@router.message(EditNewsStates.waiting_for_new_content, F.text)
+async def save_new_content(message: Message, state: FSMContext):
+    await state.update_data(new_content=message.text)
+    await message.answer("Отправьте новые фото для новости. Когда закончите — отправьте 'Готово' или 'Пропустить'.")
+    await state.set_state(EditNewsStates.waiting_for_new_photos)
+    await state.update_data(new_photos=[])
+
+
+@router.message(EditNewsStates.waiting_for_new_photos, F.photo | F.document)
+async def save_new_photo(message: Message, state: FSMContext):
+    data = await state.get_data()
+    photos = data.get("new_photos", [])
+
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        photos.append(file_id)
+        await state.update_data(new_photos=photos)
+        await message.answer("Фото добавлено. Отправьте ещё или напишите 'Готово' / 'Пропустить'.")
+
+    elif message.document:
+        if message.document.mime_type in ["image/jpeg", "image/jpg", "image/png"]:
+            file_id = message.document.file_id
+            photos.append(file_id)
+            await state.update_data(new_photos=photos)
+            await message.answer("Изображение-документ добавлено. Отправьте ещё или напишите 'Готово' / 'Пропустить'.")
+        else:
+            await message.answer("⛔ Поддерживаются только изображения JPEG, JPG, PNG.")
+    else:
+        await message.answer("Отправьте фото или изображение-документ, либо напишите 'Готово' / 'Пропустить'.")
+
+
+@router.message(EditNewsStates.waiting_for_new_photos, F.text.lower().in_({"готово", "пропустить"}))
+async def finish_edit_news(message: Message, state: FSMContext):
+    data = await state.get_data()
+    news_id = data.get("news_id")
+    new_title = data.get("new_title")
+    new_content = data.get("new_content")
+    new_photos = data.get("new_photos", [])
+
+    files = []
+    try:
+        temp_folder = Path("temp_news_upload")
+        temp_folder.mkdir(exist_ok=True)
+
+        for idx, file_id in enumerate(new_photos, 1):
+            file = await message.bot.get_file(file_id)
+            file_path = file.file_path
+            local_path = temp_folder / f"photo_{idx}.jpg"
+            await message.bot.download_file(file_path, destination=local_path)
+            files.append(local_path)
+
+        form = aiohttp.FormData()
+        form.add_field('title', new_title)
+        form.add_field('content', new_content)
+
+        if files:
+            for file_path in files:
+                form.add_field(
+                    'files',
+                    open(file_path, 'rb'),
+                    filename=file_path.name,
+                    content_type='image/jpeg'
+                )
+        else:
+            form.add_field('files', b'', filename='', content_type='application/octet-stream')
+
+        async with aiohttp.ClientSession() as session:
+            url = f"http://localhost:41235/news/update/{news_id}"
+            async with session.patch(url, data=form) as resp:
+                status = resp.status
+                text = await resp.text()
+
+        if status == 200:
+            await message.answer("✅ Новость успешно обновлена!", reply_markup=get_main_menu())
+        else:
+            await message.answer(f"❌ Ошибка при обновлении: {status}\n{text}")
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+    finally:
+        await state.clear()
+    for file_path in files:
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
