@@ -1,8 +1,12 @@
+from io import BytesIO
+
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputFile, BufferedInputFile, InputMediaPhoto
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.media_group import MediaGroupBuilder
+
 from app.keyboards import get_main_menu, get_news_menu
 from app.services.utils import is_admin
 from app.services.news_api import upload_news_to_api, fetch_news_list, fetch_news_by_id
@@ -51,6 +55,30 @@ async def list_news(callback: CallbackQuery):
         await callback.message.answer(f"❌ Ошибка: {e}")
 
 
+# @router.callback_query(F.data.startswith("news_"))
+# async def show_single_news(callback: CallbackQuery):
+#     news_id = callback.data.split("_")[1]
+#
+#     try:
+#         news = await fetch_news_by_id(news_id)
+#         text = f"📰 <b>{news.get('title')}</b>\n\n{news.get('content')}"
+#
+#         kb = InlineKeyboardMarkup(
+#             inline_keyboard=[
+#                 [
+#                     InlineKeyboardButton(text="✏️ Изменить", callback_data=f"edit_news_{news_id}"),
+#                     InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"confirm_delete_{news_id}"),
+#                     InlineKeyboardButton(text="<-- Назад", callback_data=f"list_news")
+#                 ]
+#             ],
+#             row_width=3
+#         )
+#
+#         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+#
+#     except Exception as e:
+#         await callback.message.answer(f"❌ Ошибка: {e}")
+
 @router.callback_query(F.data.startswith("news_"))
 async def show_single_news(callback: CallbackQuery):
     news_id = callback.data.split("_")[1]
@@ -70,10 +98,18 @@ async def show_single_news(callback: CallbackQuery):
             row_width=3
         )
 
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        for img in news.get("loaded_images", []):
+            file = BufferedInputFile(
+                file=img["bytes"],
+                filename=img["filename"]
+            )
+            await callback.message.answer_photo(file)
+
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
 
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка: {e}")
+
 
 @router.callback_query(F.data.startswith("confirm_delete_"))
 async def delete_news(callback: CallbackQuery):
@@ -105,7 +141,7 @@ async def add_news(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен")
         return
-    await callback.message.answer("Введите текст новости:")
+    await callback.message.answer("Введите заголовок новости:")
     await state.set_state(NewsStates.waiting_for_title)
     await callback.answer()
 

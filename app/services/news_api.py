@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import aiohttp
@@ -11,20 +12,47 @@ async def fetch_news_list():
         async with session.get(API_LIST_URL) as response:
             return await response.json()
 
+# async def fetch_news_by_id(news_id):
+#     async with aiohttp.ClientSession() as session:
+#         async with session.get(f"http://localhost:41235/news/{news_id}") as resp:
+#             resp.raise_for_status()
+#             try:
+#                 return await resp.json(content_type=None)
+#             except aiohttp.ContentTypeError:
+#                 text = await resp.text()
+#                 import json
+#                 try:
+#                     return json.loads(text)
+#                 except Exception:
+#                     return {"text": text}
 async def fetch_news_by_id(news_id):
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"http://localhost:41235/news/{news_id}") as resp:
+        async with session.get(f"{API_LIST_URL}/{news_id}") as resp:
             resp.raise_for_status()
             try:
-                return await resp.json(content_type=None)
+                news = await resp.json(content_type=None)
             except aiohttp.ContentTypeError:
                 text = await resp.text()
-                import json
                 try:
-                    return json.loads(text)
+                    news = json.loads(text)
                 except Exception:
                     return {"text": text}
 
+        images = []
+        for image_info in news.get("images", []):
+            image_name = image_info.get("name_image")
+            if image_name:
+                img_url = f"{API_LIST_URL}/img/{image_name}"
+                async with session.get(img_url) as img_resp:
+                    img_resp.raise_for_status()
+                    img_bytes = await img_resp.read()
+                    images.append({
+                        "filename": image_name,
+                        "bytes": img_bytes
+                    })
+
+        news["loaded_images"] = images
+        return news
 
 async def upload_news_to_api(title, content, files: list[Path]):
     form = aiohttp.FormData()
