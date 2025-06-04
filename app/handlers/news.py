@@ -8,11 +8,11 @@ from app.services.utils import is_admin
 from app.services.news_api import upload_news_to_api, fetch_news_list, fetch_news_by_id
 import aiohttp
 from pathlib import Path
+from config import config
 
 
-
-API_URL = "http://localhost:41235/news/add"
-API_LIST_URL = "http://localhost:41235/news"
+API_URL = config.API_BASE + "/news/add"
+API_LIST_URL = config.API_BASE + "/news"
 
 
 router = Router()
