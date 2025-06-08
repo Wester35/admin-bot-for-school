@@ -63,7 +63,7 @@ async def save_schedule(message: Message, state: FSMContext):
             status, resp_text = await upload_schedule_to_api(tmp_path)
             tmp_path.unlink(missing_ok=True)
 
-            if status == 200:
+            if status in (200, 201):
                 await message.answer("✅ Расписание успешно загружено на сервер!", reply_markup=get_main_menu())
             else:
                 await message.answer(f"❌ Ошибка при отправке: {resp_text}")
