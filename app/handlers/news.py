@@ -1,17 +1,13 @@
 from io import BytesIO
-
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, FSInputFile, InputFile, BufferedInputFile, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, BufferedInputFile, InputMediaPhoto
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.media_group import MediaGroupBuilder
-
-from app.keyboards import get_main_menu, get_news_menu
-from app.services.utils import is_admin
-from app.services.news_api import upload_news_to_api, fetch_news_list, fetch_news_by_id
 import aiohttp
-from pathlib import Path
+from app.keyboards import get_main_menu
+from app.services.utils import is_admin
+from app.services.news_api import upload_news_to_api, fetch_news_list, fetch_news_by_id, create_news_in_api
 from config import config
 
 
@@ -193,19 +189,16 @@ async def finish_news_creation(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    files = []
     try:
-        temp_folder = Path("temp_news_upload")
-        temp_folder.mkdir(exist_ok=True)
-
+        files = []
         for idx, file_id in enumerate(photos, 1):
             file = await message.bot.get_file(file_id)
-            file_path = file.file_path
-            local_path = temp_folder / f"photo_{idx}.jpg"
-            await message.bot.download_file(file_path, destination=local_path)
-            files.append(local_path)
+            file_bytes = BytesIO()
+            await message.bot.download_file(file.file_path, destination=file_bytes)
+            file_bytes.seek(0)
+            files.append((file_bytes, f"photo_{idx}.jpg"))
 
-        status, response_text = await upload_news_to_api(title, content, files)
+        status, response_text = await create_news_in_api(title, content, files)
 
         if status == 200:
             await message.answer("✅ Новость успешно отправлена!", reply_markup=get_main_menu())
@@ -216,11 +209,6 @@ async def finish_news_creation(message: Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {e}")
     finally:
         await state.clear()
-    for file_path in files:
-        try:
-            file_path.unlink()
-        except Exception:
-            pass
 
 @router.message(F.text == "/cancel")
 async def cancel_handler(message: Message, state: FSMContext):
@@ -287,50 +275,24 @@ async def finish_edit_news(message: Message, state: FSMContext):
     new_photos = data.get("new_photos", [])
 
     files = []
+
     try:
-        temp_folder = Path("temp_news_upload")
-        temp_folder.mkdir(exist_ok=True)
-
-        for idx, file_id in enumerate(new_photos, 1):
+        for idx, file_id in enumerate(new_photos):
             file = await message.bot.get_file(file_id)
-            file_path = file.file_path
-            local_path = temp_folder / f"photo_{idx}.jpg"
-            await message.bot.download_file(file_path, destination=local_path)
-            files.append(local_path)
+            file_bytes = await message.bot.download_file(file.file_path)
+            bio = BytesIO(file_bytes.read())
+            filename = f'photo_{idx+1}.jpg'
+            files.append((bio, filename))
 
-        form = aiohttp.FormData()
-        form.add_field('title', new_title)
-        form.add_field('content', new_content)
-
-        if files:
-            for file_path in files:
-                form.add_field(
-                    'files',
-                    open(file_path, 'rb'),
-                    filename=file_path.name,
-                    content_type='image/jpeg'
-                )
-        else:
-            form.add_field('files', b'', filename='', content_type='application/octet-stream')
-
-        async with aiohttp.ClientSession() as session:
-            url = f"http://localhost:41235/news/update/{news_id}"
-            async with session.patch(url, data=form) as resp:
-                status = resp.status
-                text = await resp.text()
+        status, resp_text = await upload_news_to_api(news_id, new_title, new_content, files)
 
         if status == 200:
             await message.answer("✅ Новость успешно обновлена!", reply_markup=get_main_menu())
         else:
-            await message.answer(f"❌ Ошибка при обновлении: {status}\n{text}")
+            await message.answer(f"❌ Ошибка при обновлении: {status}\n{resp_text}")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
 
     finally:
         await state.clear()
-    for file_path in files:
-        try:
-            file_path.unlink()
-        except Exception:
-            pass

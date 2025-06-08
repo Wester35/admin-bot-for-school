@@ -1,11 +1,50 @@
 import json
-from pathlib import Path
-
+from io import BytesIO
 import aiohttp
 from config import config
 
 API_LIST_URL = f"{config.API_BASE}/news"
 API_UPLOAD_URL = f"{config.API_BASE}/news/add"
+
+
+async def create_news_in_api(title: str, content: str, files: list[tuple[BytesIO, str]]):
+    form = aiohttp.FormData()
+    form.add_field("title", title)
+    form.add_field("content", content)
+
+    for file_obj, filename in files:
+        file_obj.seek(0)
+        form.add_field(
+            "files",
+            file_obj,
+            filename=filename,
+            content_type="image/jpeg"
+        )
+
+    async with aiohttp.ClientSession() as session:
+        async with session.put(API_UPLOAD_URL, data=form) as response:
+            return response.status, await response.text()
+
+async def upload_news_to_api(news_id: int, title: str, content: str, files: list[tuple[BytesIO, str]]):
+    form = aiohttp.FormData()
+    form.add_field("title", title)
+    form.add_field("content", content)
+
+    for file_obj, filename in files:
+        file_obj.seek(0)
+        form.add_field(
+            "files",
+            file_obj,
+            filename=filename,
+            content_type="image/jpeg"
+        )
+
+    async with aiohttp.ClientSession() as session:
+        url = f"{config.API_BASE}/news/update/{news_id}"
+        async with session.patch(url, data=form) as response:
+            return response.status, await response.text()
+
+
 
 async def fetch_news_list():
     async with aiohttp.ClientSession() as session:
@@ -53,20 +92,3 @@ async def fetch_news_by_id(news_id):
 
         news["loaded_images"] = images
         return news
-
-async def upload_news_to_api(title, content, files: list[Path]):
-    form = aiohttp.FormData()
-    form.add_field("title", title)
-    form.add_field("content", content)
-
-    for photo_path in files:
-        form.add_field(
-            "files",
-            open(photo_path, "rb"),
-            filename=photo_path.name,
-            content_type="image/jpeg"
-        )
-
-    async with aiohttp.ClientSession() as session:
-        async with session.put(API_UPLOAD_URL, data=form) as response:
-            return response.status, await response.text()

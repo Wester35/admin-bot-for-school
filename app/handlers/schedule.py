@@ -1,16 +1,12 @@
-import os
 import uuid
-
+from io import BytesIO
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, FSInputFile, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, BufferedInputFile
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from app.keyboards import get_main_menu, get_news_menu
+from app.keyboards import get_main_menu
 from app.services.schedule_api import upload_schedule_to_api, fetch_schedule
 from app.services.utils import is_admin
-import aiohttp
-from pathlib import Path
 
 
 router = Router()
@@ -38,10 +34,8 @@ async def save_schedule(message: Message, state: FSMContext):
             photo = message.photo[-1]
             file_id = photo.file_id
             file_ext = "jpg"
-            filename = f"schedule_{uuid.uuid4()}.{file_ext}"
-
         elif message.document:
-            allowed_extensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx']
+            allowed_extensions = ['jpg', 'jpeg', 'png']
             file_ext = message.document.file_name.split('.')[-1].lower()
 
             if file_ext not in allowed_extensions:
@@ -52,28 +46,27 @@ async def save_schedule(message: Message, state: FSMContext):
                 return
 
             file_id = message.document.file_id
-            filename = f"schedule_{uuid.uuid4()}.{file_ext}"
-
-        if file_id:
-            tmp_path = Path("tmp") / filename
-            tmp_path.parent.mkdir(exist_ok=True)
-            file = await message.bot.get_file(file_id)
-            await message.bot.download_file(file.file_path, destination=str(tmp_path))
-
-            status, resp_text = await upload_schedule_to_api(tmp_path)
-            tmp_path.unlink(missing_ok=True)
-
-            if status in (200, 201):
-                await message.answer("✅ Расписание успешно загружено на сервер!", reply_markup=get_main_menu())
-            else:
-                await message.answer(f"❌ Ошибка при отправке: {resp_text}")
         else:
             await message.answer("❌ Не удалось получить файл")
+            return
+
+        filename = f"schedule_{uuid.uuid4()}.{file_ext}"
+        tg_file = await message.bot.get_file(file_id)
+        file_bytes = await message.bot.download_file(tg_file.file_path)
+
+        bio = BytesIO(file_bytes.read())
+        status, resp_text = await upload_schedule_to_api(bio, filename)
+
+        if status in (200, 201):
+            await message.answer(f"✅ {resp_text.strip()}", reply_markup=get_main_menu())
+        else:
+            await message.answer(f"❌ Ошибка при отправке: {resp_text}")
 
     except Exception as e:
         await message.answer(f"❌ Ошибка при загрузке: {str(e)}")
     finally:
         await state.clear()
+
 
 
 @router.callback_query(F.data == 'view_schedule')
