@@ -1,0 +1,7 @@
+.env
+.idea/
+__pycache__/
+downloads/
+uploaded_news/
+schedules/
+news/
